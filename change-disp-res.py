@@ -11,12 +11,51 @@ DISP_CHANGE_SUCCESSFUL = 0
 CDS_TEST = 0x00000002
 
 
-def change_resolution(width: int, height: int) -> bool:
-    """Change the screen resolution on Windows.
+class DISPLAY_DEVICE(ctypes.Structure):  # pylint: disable=too-few-public-methods
+    """Windows DISPLAY_DEVICE structure for display enumeration."""
+
+    _fields_ = [
+        ("cb", ctypes.c_ulong),
+        ("DeviceName", ctypes.c_wchar * 32),
+        ("DeviceString", ctypes.c_wchar * 128),
+        ("StateFlags", ctypes.c_ulong),
+        ("DeviceID", ctypes.c_wchar * 128),
+        ("DeviceKey", ctypes.c_wchar * 128),
+    ]
+
+
+def list_displays() -> list[str]:
+    """Enumerate and print all active display devices.
+
+    Returns:
+        A list of active display device names.
+    """
+    user32 = ctypes.windll.user32
+    devices = []
+    index = 0
+
+    while True:
+        display = DISPLAY_DEVICE()
+        display.cb = ctypes.sizeof(DISPLAY_DEVICE)  # pylint: disable=attribute-defined-outside-init
+        if not user32.EnumDisplayDevicesW(None, index, ctypes.byref(display), 0):
+            break
+        # DISPLAY_DEVICE_ACTIVE = 0x00000001
+        if display.StateFlags & 0x00000001:
+            devices.append(display.DeviceName)
+            print(f"  {display.DeviceName} - {display.DeviceString}")
+        index += 1
+
+    return devices
+
+
+def change_resolution(width: int, height: int, device_name: str = None) -> bool:
+    """Change the screen resolution of the specified display device on Windows.
 
     Args:
         width: Desired screen width in pixels.
         height: Desired screen height in pixels.
+        device_name: Display device name (e.g. r'\\\\.\\DISPLAY1'). If None,
+            the primary display is used.
 
     Returns:
         True if the resolution was changed successfully, False otherwise.
@@ -55,8 +94,8 @@ def change_resolution(width: int, height: int) -> bool:
     devmode = DEVMODE()
     devmode.dmSize = ctypes.sizeof(DEVMODE)  # pylint: disable=attribute-defined-outside-init
 
-    # Enumerate current display settings
-    if not user32.EnumDisplaySettingsW(None, -1, ctypes.byref(devmode)):
+    # Enumerate current display settings for the specified device
+    if not user32.EnumDisplaySettingsW(device_name, -1, ctypes.byref(devmode)):
         print("Error: Could not retrieve current display settings.")
         return False
 
@@ -64,14 +103,18 @@ def change_resolution(width: int, height: int) -> bool:
     devmode.dmPelsHeight = height  # pylint: disable=attribute-defined-outside-init
     devmode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT  # pylint: disable=attribute-defined-outside-init
 
-    # Test if the resolution is supported
-    result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), CDS_TEST)
+    # Test if the resolution is supported on the specified device
+    result = user32.ChangeDisplaySettingsExW(
+        device_name, ctypes.byref(devmode), None, CDS_TEST, None
+    )
     if result != DISP_CHANGE_SUCCESSFUL:
         print(f"Error: Resolution {width}x{height} is not supported.")
         return False
 
-    # Apply the resolution change
-    result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
+    # Apply the resolution change to the specified device
+    result = user32.ChangeDisplaySettingsExW(
+        device_name, ctypes.byref(devmode), None, 0, None
+    )
     if result == DISP_CHANGE_SUCCESSFUL:
         print(f"Resolution changed to {width}x{height} successfully.")
         return True
@@ -81,6 +124,21 @@ def change_resolution(width: int, height: int) -> bool:
 
 
 if __name__ == "__main__":
-    desired_width = int(input("Enter desired width: "))
-    desired_height = int(input("Enter desired height: "))
-    change_resolution(desired_width, desired_height)
+    print("Active displays:")
+    display_names = list_displays()
+    if not display_names:
+        print("No active displays found.")
+    else:
+        print()
+        for i, name in enumerate(display_names, 1):
+            print(f"  {i}. {name}")
+        print()
+        choice = int(input(f"Select display (1-{len(display_names)}): "))
+        if 1 <= choice <= len(display_names):
+            selected_device = display_names[choice - 1]
+            print(f"Selected: {selected_device}")
+            desired_width = int(input("Enter desired width: "))
+            desired_height = int(input("Enter desired height: "))
+            change_resolution(desired_width, desired_height, selected_device)
+        else:
+            print("Invalid selection.")
