@@ -4,8 +4,6 @@ Module for changing the display resolution on Windows.
 """
 
 import ctypes
-import threading
-import tkinter as tk
 
 DM_PELSWIDTH = 0x00080000
 DM_PELSHEIGHT = 0x00100000
@@ -79,77 +77,40 @@ def list_displays() -> list[str]:
     return devices
 
 
-def identify_displays(display_names: list[str], duration: int = 30) -> None:
-    """Show a large number overlay on each display for identification.
+def get_display_at_cursor(display_names: list[str]) -> str | None:
+    """Find the display device name where the mouse cursor is located.
 
     Args:
         display_names: List of display device names from list_displays().
-        duration: How many seconds to show the overlay.
+
+    Returns:
+        The device name of the display under the cursor, or None if not found.
     """
     user32 = ctypes.windll.user32
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
 
-    # Get position and size of each display
-    monitors = []
-    for i, name in enumerate(display_names, 1):
+    # Get cursor position
+    class POINT(ctypes.Structure):  # pylint: disable=too-few-public-methods
+        """Windows POINT structure."""
+
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    cursor = POINT()
+    user32.GetCursorPos(ctypes.byref(cursor))
+
+    # Check which display contains the cursor
+    for name in display_names:
         devmode = DEVMODE()
         devmode.dmSize = ctypes.sizeof(DEVMODE)  # pylint: disable=attribute-defined-outside-init
         if user32.EnumDisplaySettingsW(name, -1, ctypes.byref(devmode)):
-            monitors.append(
-                (
-                    i,
-                    name,
-                    devmode.dmPositionX,
-                    devmode.dmPositionY,
-                    devmode.dmPelsWidth,
-                    devmode.dmPelsHeight,
-                )
-            )
+            left = devmode.dmPositionX
+            top = devmode.dmPositionY
+            right = left + devmode.dmPelsWidth
+            bottom = top + devmode.dmPelsHeight
+            if left <= cursor.x < right and top <= cursor.y < bottom:
+                return name
 
-    if not monitors:
-        print("No display positions found.")
-        return
-
-    def show_overlays():
-        # Enable DPI awareness so window coordinates match physical pixels
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-
-        root = tk.Tk()
-        root.withdraw()
-
-        windows = []
-        for number, _, x, y, w, h in monitors:
-            win = tk.Toplevel(root)
-            win.overrideredirect(True)
-            win.attributes("-topmost", True)
-            win.configure(bg="black")
-
-            label = tk.Label(
-                win,
-                text=str(number),
-                font=("Arial", 150, "bold"),
-                fg="white",
-                bg="black",
-            )
-            label.pack(expand=True, fill="both")
-
-            # Center a 300x300 window on the display
-            win_w, win_h = 300, 300
-            cx = x + (w - win_w) // 2
-            cy = y + (h - win_h) // 2
-            win.geometry(f"{win_w}x{win_h}+{cx}+{cy}")
-            windows.append(win)
-
-        def close_all():
-            for win in windows:
-                win.destroy()
-            root.destroy()
-
-        root.after(duration * 1000, close_all)
-        root.mainloop()
-
-    overlay_thread = threading.Thread(target=show_overlays, daemon=True)
-    overlay_thread.start()
-    overlay_thread.join()
+    return None
 
 
 def change_resolution(width: int, height: int, device_name: str = None) -> bool:
@@ -209,9 +170,9 @@ if __name__ == "__main__":
         for i, name in enumerate(display_names, 1):
             print(f"  {i}. {name}")
         print()
-        identify = input("Identify displays? (y/n): ").strip().lower()
-        if identify == "y":
-            identify_displays(display_names)
+        cursor_display = get_display_at_cursor(display_names)
+        if cursor_display:
+            print(f"Mouse cursor is on: {cursor_display}")
         print()
         choice = int(input(f"Select display (1-{len(display_names)}): "))
         if 1 <= choice <= len(display_names):
