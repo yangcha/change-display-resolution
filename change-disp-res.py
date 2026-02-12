@@ -77,11 +77,11 @@ def list_displays() -> list[str]:
     return devices
 
 
-def get_display_at_cursor(display_names: list[str]) -> str | None:
+def get_display_at_cursor(display_device_names: list[str]) -> str | None:
     """Find the display device name where the mouse cursor is located.
 
     Args:
-        display_names: List of display device names from list_displays().
+        display_device_names: List of display device names from list_displays().
 
     Returns:
         The device name of the display under the cursor, or None if not found.
@@ -99,21 +99,21 @@ def get_display_at_cursor(display_names: list[str]) -> str | None:
     user32.GetCursorPos(ctypes.byref(cursor))
 
     # Check which display contains the cursor
-    for name in display_names:
+    for device_name in display_device_names:
         devmode = DEVMODE()
         devmode.dmSize = ctypes.sizeof(DEVMODE)  # pylint: disable=attribute-defined-outside-init
-        if user32.EnumDisplaySettingsW(name, -1, ctypes.byref(devmode)):
+        if user32.EnumDisplaySettingsW(device_name, -1, ctypes.byref(devmode)):
             left = devmode.dmPositionX
             top = devmode.dmPositionY
             right = left + devmode.dmPelsWidth
             bottom = top + devmode.dmPelsHeight
             if left <= cursor.x < right and top <= cursor.y < bottom:
-                return name
+                return device_name
 
     return None
 
 
-def change_resolution(width: int, height: int, device_name: str = None) -> bool:
+def change_resolution(width: int, height: int, device_name: str | None = None) -> bool:
     """Change the screen resolution of the specified display device on Windows.
 
     Args:
